@@ -22,24 +22,58 @@ def execute_task(task_id: str):
         task = tasks[task_id]
         task["status"] = "running"
 
+    print(f"\n{'='*50}")
+    print(f"[TASK {task_id[:8]}] Started")
+    print(f"{'='*50}")
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(task["script"])
         tmp = f.name
 
+    stdout_lines = []
+    stderr_lines = []
     try:
-        r = subprocess.run([sys.executable, tmp], capture_output=True, text=True, timeout=TIMEOUT,
-                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        stdout, stderr, code = r.stdout, r.stderr, r.returncode
+        proc = subprocess.Popen(
+            [sys.executable, "-u", tmp],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+
+        def read_stream(stream, buf, prefix):
+            for line in stream:
+                buf.append(line)
+                print(f"  [{task_id[:8]}] {prefix} {line}", end="")
+
+        t_out = threading.Thread(target=read_stream, args=(proc.stdout, stdout_lines, "│"))
+        t_err = threading.Thread(target=read_stream, args=(proc.stderr, stderr_lines, "ERR│"))
+        t_out.start()
+        t_err.start()
+
+        proc.wait(timeout=TIMEOUT)
+        t_out.join()
+        t_err.join()
+        code = proc.returncode
     except subprocess.TimeoutExpired:
-        stdout, stderr, code = "", f"Timeout ({TIMEOUT}s)", 1
+        proc.kill()
+        stdout_lines.append("")
+        stderr_lines.append(f"Timeout ({TIMEOUT}s)")
+        code = 1
     except Exception as e:
-        stdout, stderr, code = "", str(e), 1
+        stderr_lines.append(str(e))
+        code = 1
     finally:
         os.unlink(tmp)
 
+    stdout = "".join(stdout_lines)
+    stderr = "".join(stderr_lines)
+    status = "done" if code == 0 else "failed"
+
+    print(f"[TASK {task_id[:8]}] {status.upper()} (exit {code})")
+    print(f"{'='*50}\n")
+
     with lock:
         tasks[task_id].update(
-            status="done" if code == 0 else "failed",
+            status=status,
             stdout=stdout[-10000:],
             stderr=stderr[-10000:],
             exitCode=code,
