@@ -11,33 +11,58 @@
   .specs { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
   .spec { background: #16213e; padding: 10px 15px; border-radius: 6px; }
   .spec b { color: #00d4ff; }
+  section { margin-bottom: 25px; }
+  section h2 { font-size: 14px; color: #888; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+  section h2 span { font-size: 12px; color: #555; }
   .task { background: #16213e; border-radius: 6px; padding: 15px; margin-bottom: 10px; border-left: 4px solid #444; }
   .task.done { border-left-color: #00c853; }
   .task.failed { border-left-color: #ff1744; }
   .task.running { border-left-color: #ffab00; }
   .task.pending { border-left-color: #888; }
-  .task-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .task.killed { border-left-color: #ff6b6b; }
+  .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .task-id { color: #888; font-size: 12px; }
   .status { padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; }
   .status.done { background: #00c853; color: #000; }
   .status.failed { background: #ff1744; color: #fff; }
   .status.running { background: #ffab00; color: #000; }
   .status.pending { background: #444; }
+  .kill-btn { background: #ff1744; color: #fff; border: none; padding: 3px 10px; border-radius: 3px; cursor: pointer; font-family: monospace; font-size: 12px; margin-left: 8px; }
+  .kill-btn:hover { background: #d50000; }
   pre { background: #0f0f23; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; margin-top: 8px; white-space: pre-wrap; }
   .stderr { color: #ff6b6b; }
-  .toggle { cursor: pointer; color: #00d4ff; font-size: 12px; }
-  .empty { color: #555; text-align: center; padding: 40px; }
+  .empty { color: #555; font-size: 13px; padding: 10px 0; }
 </style>
 </head>
 <body>
 <h1>AiRelay</h1>
 <div class="meta" id="meta"></div>
 <div class="specs" id="specs"></div>
-<div id="tasks"><div class="empty">Loading...</div></div>
+<div id="sections"></div>
 <script>
 const KEY = localStorage.getItem('airelay_key') || prompt('API Key:');
 if (KEY) localStorage.setItem('airelay_key', KEY);
 const hdrs = {'x-api-key': KEY};
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderTask(t) {
+  const killBtn = (t.status === 'running' || t.status === 'pending')
+    ? `<button class="kill-btn" onclick="killTask('${t.id}')">kill</button>` : '';
+  return `<div class="task ${t.status}">
+    <div class="task-header">
+      <span class="task-id">${t.id.slice(0,8)} · ${new Date(t.createdAt).toLocaleTimeString()}${t.finishedAt ? ' → '+new Date(t.finishedAt).toLocaleTimeString() : ''}</span>
+      <span><span class="status ${t.status}">${t.status}${t.exitCode != null ? ' ('+t.exitCode+')' : ''}</span>${killBtn}</span>
+    </div>
+    ${t.stdout ? `<pre>${esc(t.stdout)}</pre>` : ''}
+    ${t.stderr ? `<pre class="stderr">${esc(t.stderr)}</pre>` : ''}
+  </div>`;
+}
+
+async function killTask(id) {
+  await fetch('/tasks/'+id, {method:'DELETE', headers: hdrs});
+  refresh();
+}
 
 async function refresh() {
   try {
@@ -59,22 +84,26 @@ async function refresh() {
       `<div class="spec"><b>${health.running_tasks}</b> running</div>`,
     ].filter(Boolean).join('');
 
-    const el = document.getElementById('tasks');
-    if (!tasks.length) { el.innerHTML = '<div class="empty">No tasks yet</div>'; return; }
-    el.innerHTML = tasks.map(t => `
-      <div class="task ${t.status}">
-        <div class="task-header">
-          <span class="task-id">${t.id.slice(0,8)} · ${new Date(t.createdAt).toLocaleTimeString()}</span>
-          <span class="status ${t.status}">${t.status}${t.exitCode != null ? ' ('+t.exitCode+')' : ''}</span>
-        </div>
-        ${t.stdout ? `<pre>${esc(t.stdout)}</pre>` : ''}
-        ${t.stderr ? `<pre class="stderr">${esc(t.stderr)}</pre>` : ''}
-      </div>
-    `).join('');
+    const groups = {running:[], pending:[], failed:[], done:[]};
+    tasks.forEach(t => (groups[t.status] || groups.done).push(t));
+
+    const sections = [
+      {key:'running', title:'Running'},
+      {key:'pending', title:'Pending'},
+      {key:'failed', title:'Failed'},
+      {key:'done', title:'Completed'},
+    ];
+
+    document.getElementById('sections').innerHTML = sections.map(s => {
+      const list = groups[s.key];
+      return `<section>
+        <h2>${s.title} <span>(${list.length})</span></h2>
+        ${list.length ? list.map(renderTask).join('') : '<div class="empty">None</div>'}
+      </section>`;
+    }).join('');
   } catch(e) { console.error(e); }
 }
 
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 refresh();
 setInterval(refresh, 3000);
 </script>
