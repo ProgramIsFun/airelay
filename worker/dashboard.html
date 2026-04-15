@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AiRelay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+  h1 { color: #00d4ff; margin-bottom: 5px; }
+  .meta { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .specs { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+  .spec { background: #16213e; padding: 10px 15px; border-radius: 6px; }
+  .spec b { color: #00d4ff; }
+  .task { background: #16213e; border-radius: 6px; padding: 15px; margin-bottom: 10px; border-left: 4px solid #444; }
+  .task.done { border-left-color: #00c853; }
+  .task.failed { border-left-color: #ff1744; }
+  .task.running { border-left-color: #ffab00; }
+  .task.pending { border-left-color: #888; }
+  .task-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .task-id { color: #888; font-size: 12px; }
+  .status { padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; }
+  .status.done { background: #00c853; color: #000; }
+  .status.failed { background: #ff1744; color: #fff; }
+  .status.running { background: #ffab00; color: #000; }
+  .status.pending { background: #444; }
+  pre { background: #0f0f23; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; margin-top: 8px; white-space: pre-wrap; }
+  .stderr { color: #ff6b6b; }
+  .toggle { cursor: pointer; color: #00d4ff; font-size: 12px; }
+  .empty { color: #555; text-align: center; padding: 40px; }
+</style>
+</head>
+<body>
+<h1>AiRelay</h1>
+<div class="meta" id="meta"></div>
+<div class="specs" id="specs"></div>
+<div id="tasks"><div class="empty">Loading...</div></div>
+<script>
+const KEY = localStorage.getItem('airelay_key') || prompt('API Key:');
+if (KEY) localStorage.setItem('airelay_key', KEY);
+const hdrs = {'x-api-key': KEY};
+
+async function refresh() {
+  try {
+    const [hRes, tRes] = await Promise.all([
+      fetch('/health', {headers: hdrs}),
+      fetch('/tasks', {headers: hdrs})
+    ]);
+    const health = await hRes.json();
+    const tasks = await tRes.json();
+
+    document.getElementById('meta').textContent =
+      `${health.hostname} · ${health.platform} · v${health.version}`;
+
+    const s = health.specs || {};
+    document.getElementById('specs').innerHTML = [
+      s.cpu_count && `<div class="spec"><b>${s.cpu_count}</b> cores${s.cpu_percent != null ? ` · ${s.cpu_percent}%` : ''}</div>`,
+      s.memory_total_gb && `<div class="spec"><b>${s.memory_available_gb}</b> / ${s.memory_total_gb} GB RAM</div>`,
+      s.disk_free_gb && `<div class="spec"><b>${s.disk_free_gb}</b> / ${s.disk_total_gb} GB disk</div>`,
+      `<div class="spec"><b>${health.running_tasks}</b> running</div>`,
+    ].filter(Boolean).join('');
+
+    const el = document.getElementById('tasks');
+    if (!tasks.length) { el.innerHTML = '<div class="empty">No tasks yet</div>'; return; }
+    el.innerHTML = tasks.map(t => `
+      <div class="task ${t.status}">
+        <div class="task-header">
+          <span class="task-id">${t.id.slice(0,8)} · ${new Date(t.createdAt).toLocaleTimeString()}</span>
+          <span class="status ${t.status}">${t.status}${t.exitCode != null ? ' ('+t.exitCode+')' : ''}</span>
+        </div>
+        ${t.stdout ? `<pre>${esc(t.stdout)}</pre>` : ''}
+        ${t.stderr ? `<pre class="stderr">${esc(t.stderr)}</pre>` : ''}
+      </div>
+    `).join('');
+  } catch(e) { console.error(e); }
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

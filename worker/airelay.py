@@ -29,7 +29,7 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 store = MemoryStore()
 
@@ -156,6 +156,14 @@ class Handler(BaseHTTPRequestHandler):
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def do_GET(self):
+        if self.path == "/":
+            html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+            with open(html_path, "rb") as f:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(f.read())
+            return
         if not self._auth():
             return
         if self.path == "/tasks":
