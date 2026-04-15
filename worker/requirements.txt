@@ -1,1 +1,3 @@
 # no external dependencies - stdlib only
+# optional: pip install psutil (for detailed system specs in /health)
+psutil

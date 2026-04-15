@@ -29,7 +29,7 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 store = MemoryStore()
 
@@ -167,7 +167,30 @@ class Handler(BaseHTTPRequestHandler):
                 return self._respond(404, {"error": "Not found"})
             self._respond(200, task)
         elif self.path == "/health":
-            self._respond(200, {"status": "ok", "version": VERSION})
+            import platform
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                disk = psutil.disk_usage(os.path.expanduser("~"))
+                specs = {
+                    "cpu_count": os.cpu_count(),
+                    "cpu_percent": psutil.cpu_percent(interval=0.5),
+                    "memory_total_gb": round(mem.total / 1e9, 1),
+                    "memory_available_gb": round(mem.available / 1e9, 1),
+                    "disk_total_gb": round(disk.total / 1e9, 1),
+                    "disk_free_gb": round(disk.free / 1e9, 1),
+                }
+            except ImportError:
+                specs = {"cpu_count": os.cpu_count()}
+            running = sum(1 for t in store.list(100) if t["status"] == "running")
+            self._respond(200, {
+                "status": "ok",
+                "version": VERSION,
+                "platform": platform.system(),
+                "hostname": platform.node(),
+                "specs": specs,
+                "running_tasks": running,
+            })
         else:
             self._respond(404, {"error": "Not found"})
 
