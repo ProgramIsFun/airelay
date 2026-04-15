@@ -29,9 +29,11 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 store = MemoryStore()
+procs: dict[str, subprocess.Popen] = {}
+procs_lock = threading.Lock()
 
 
 def execute_task(task_id: str):
@@ -54,6 +56,8 @@ def execute_task(task_id: str):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
+        with procs_lock:
+            procs[task_id] = proc
 
         def read_stream(stream, buf, prefix):
             for line in stream:
@@ -91,6 +95,9 @@ def execute_task(task_id: str):
 
     log.info(f"[TASK {task_id[:8]}] {status.upper()} (exit {code})")
     log.info(f"{'='*50}")
+
+    with procs_lock:
+        procs.pop(task_id, None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -199,6 +206,26 @@ class Handler(BaseHTTPRequestHandler):
                 "specs": specs,
                 "running_tasks": running,
             })
+        else:
+            self._respond(404, {"error": "Not found"})
+
+    def do_DELETE(self):
+        if not self._auth():
+            return
+        if self.path.startswith("/tasks/"):
+            task_id = self.path.split("/tasks/")[1]
+            task = store.get(task_id)
+            if not task:
+                return self._respond(404, {"error": "Not found"})
+            if task["status"] == "running":
+                with procs_lock:
+                    proc = procs.get(task_id)
+                if proc:
+                    proc.kill()
+                    log.info(f"[TASK {task_id[:8]}] KILLED")
+                self._respond(200, {"message": "killed"})
+            else:
+                self._respond(400, {"error": f"Task is {task['status']}, not running"})
         else:
             self._respond(404, {"error": "Not found"})
 
