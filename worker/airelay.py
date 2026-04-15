@@ -12,6 +12,7 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
+VERSION = "0.2.0"
 
 tasks: dict[str, dict] = {}
 lock = threading.Lock()
@@ -160,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._respond(404, {"error": "Not found"})
             self._respond(200, task)
         elif self.path == "/health":
-            self._respond(200, {"status": "ok"})
+            self._respond(200, {"status": "ok", "version": VERSION})
         else:
             self._respond(404, {"error": "Not found"})
 
