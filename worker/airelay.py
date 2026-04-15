@@ -125,8 +125,25 @@ class Handler(BaseHTTPRequestHandler):
                 tasks[task_id] = task
             threading.Thread(target=execute_task, args=(task_id,), daemon=True).start()
             self._respond(201, task)
+        elif self.path == "/update":
+            self._do_update()
         else:
             self._respond(404, {"error": "Not found"})
+
+    def _do_update(self):
+        server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run(["git", "-C", server_dir, "pull"], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return self._respond(500, {"error": r.stderr.strip()})
+        self._respond(200, {"message": r.stdout.strip(), "restarting": True})
+        threading.Thread(target=self._restart, daemon=True).start()
+
+    @staticmethod
+    def _restart():
+        import time
+        time.sleep(1)
+        print("\n[*] Restarting...\n")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def do_GET(self):
         if not self._auth():
