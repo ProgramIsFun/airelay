@@ -11,6 +11,7 @@ import json
 API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
+ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
 
 tasks: dict[str, dict] = {}
 lock = threading.Lock()
@@ -47,6 +48,9 @@ def execute_task(task_id: str):
 
 class Handler(BaseHTTPRequestHandler):
     def _auth(self):
+        if ALLOWED_IPS and self.client_address[0] not in ALLOWED_IPS:
+            self._respond(403, {"error": "Forbidden"})
+            return False
         if self.headers.get("x-api-key") != API_KEY:
             self._respond(401, {"error": "Unauthorized"})
             return False
