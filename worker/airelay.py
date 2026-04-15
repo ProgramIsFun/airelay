@@ -29,9 +29,10 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
-store = MemoryStore()
+PERSIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tasks.json")
+store = MemoryStore(persist_path=PERSIST_PATH)
 procs: dict[str, subprocess.Popen] = {}
 procs_lock = threading.Lock()
 
