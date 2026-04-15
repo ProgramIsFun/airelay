@@ -113,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(404, {"error": "Not found"})
 
     def log_message(self, fmt, *args):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.client_address[0]} {args[0]}")
 
 
 def main():
