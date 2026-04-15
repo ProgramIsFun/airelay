@@ -27,7 +27,8 @@ def execute_task(task_id: str):
         tmp = f.name
 
     try:
-        r = subprocess.run([sys.executable, tmp], capture_output=True, text=True, timeout=TIMEOUT)
+        r = subprocess.run([sys.executable, tmp], capture_output=True, text=True, timeout=TIMEOUT,
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         stdout, stderr, code = r.stdout, r.stderr, r.returncode
     except subprocess.TimeoutExpired:
         stdout, stderr, code = "", f"Timeout ({TIMEOUT}s)", 1
