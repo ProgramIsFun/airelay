@@ -29,7 +29,55 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.8.0"
+VERSION = "0.9.0"
+
+ABOUT = """AiRelay — AI Task Relay (v""" + "0.9.0" + """)
+
+AiRelay lets an AI assistant execute Python scripts on remote machines via HTTP.
+Each machine runs a single Python process that acts as both API server and task executor.
+
+AUTHENTICATION:
+  All endpoints (except GET / and GET /about) require header: x-api-key: <secret>
+
+ENDPOINTS:
+  GET  /            Web dashboard (no auth)
+  GET  /about       This description (no auth)
+  GET  /health      System specs, version, running task count
+  POST /tasks       Submit a task: {"script": "<python code>"}
+                    Returns task object with id. Task runs immediately in background.
+  GET  /tasks       List recent tasks (newest first, max 50)
+  GET  /tasks/:id   Get a specific task with its result
+  DELETE /tasks/:id Kill a running task
+  POST /update      Self-update: git pulls latest code and restarts
+
+TASK OBJECT:
+  id         - UUID
+  script     - The Python code that was submitted
+  status     - pending | running | done | failed
+  stdout     - Captured stdout (last 10000 chars)
+  stderr     - Captured stderr (last 10000 chars)
+  exitCode   - Process exit code (0 = success)
+  createdAt  - ISO timestamp
+  finishedAt - ISO timestamp (null if not finished)
+
+USAGE EXAMPLE:
+  # Submit a task
+  curl -X POST http://<host>:3200/tasks \\
+    -H "x-api-key: <key>" -H "Content-Type: application/json" \\
+    -d '{"script": "print(1+1)"}'
+
+  # Check result
+  curl http://<host>:3200/tasks/<id> -H "x-api-key: <key>"
+
+  # Kill a task
+  curl -X DELETE http://<host>:3200/tasks/<id> -H "x-api-key: <key>"
+
+NOTES:
+  - Tasks run as separate Python processes with a 600s timeout (configurable via TASK_TIMEOUT env)
+  - stdout/stderr stream live to the server console and log file
+  - Task history persists to tasks.json and survives restarts
+  - Multiple machines can run AiRelay independently, each on its own IP
+"""
 
 PERSIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tasks.json")
 store = MemoryStore(persist_path=PERSIST_PATH)
@@ -171,6 +219,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "text/html")
                 self.end_headers()
                 self.wfile.write(f.read())
+            return
+        if self.path == "/about":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(ABOUT.encode())
             return
         if not self._auth():
             return
