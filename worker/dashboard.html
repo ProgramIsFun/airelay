@@ -31,6 +31,9 @@
   .kill-btn:hover { background: #d50000; }
   pre { background: #0f0f23; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; margin-top: 8px; white-space: pre-wrap; }
   .stderr { color: #ff6b6b; }
+  .script { border-left: 2px solid #00d4ff; }
+  .toggle { cursor: pointer; color: #00d4ff; font-size: 12px; margin-right: 8px; }
+  .toggle:hover { text-decoration: underline; }
   .empty { color: #555; font-size: 13px; padding: 10px 0; }
 </style>
 </head>
@@ -45,15 +48,21 @@ if (KEY) localStorage.setItem('airelay_key', KEY);
 const hdrs = {'x-api-key': KEY};
 
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function toggle(id) { const el=document.getElementById(id); el.style.display=el.style.display==='none'?'block':'none'; }
 
 function renderTask(t) {
   const killBtn = (t.status === 'running' || t.status === 'pending')
     ? `<button class="kill-btn" onclick="killTask('${t.id}')">kill</button>` : '';
+  const scriptId = 'script-' + t.id;
   return `<div class="task ${t.status}">
     <div class="task-header">
       <span class="task-id">${t.id.slice(0,8)} · ${new Date(t.createdAt).toLocaleTimeString()}${t.finishedAt ? ' → '+new Date(t.finishedAt).toLocaleTimeString() : ''}</span>
-      <span><span class="status ${t.status}">${t.status}${t.exitCode != null ? ' ('+t.exitCode+')' : ''}</span>${killBtn}</span>
+      <span>
+        <span class="toggle" onclick="toggle('${scriptId}')">script</span>
+        <span class="status ${t.status}">${t.status}${t.exitCode != null ? ' ('+t.exitCode+')' : ''}</span>${killBtn}
+      </span>
     </div>
+    <pre id="${scriptId}" class="script" style="display:none">${esc(t.script)}</pre>
     ${t.stdout ? `<pre>${esc(t.stdout)}</pre>` : ''}
     ${t.stderr ? `<pre class="stderr">${esc(t.stderr)}</pre>` : ''}
   </div>`;
