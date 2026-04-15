@@ -1,18 +1,34 @@
 import os
 import sys
 import uuid
+import socket
 import threading
 import tempfile
 import subprocess
+import logging
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+
+# Logging setup
+LOG_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(LOG_DIR, "airelay.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+log = logging.getLogger("airelay")
 
 API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 tasks: dict[str, dict] = {}
 lock = threading.Lock()
@@ -23,9 +39,9 @@ def execute_task(task_id: str):
         task = tasks[task_id]
         task["status"] = "running"
 
-    print(f"\n{'='*50}")
-    print(f"[TASK {task_id[:8]}] Started")
-    print(f"{'='*50}")
+    log.info(f"{'='*50}")
+    log.info(f"[TASK {task_id[:8]}] Started")
+    log.info(f"{'='*50}")
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(task["script"])
@@ -43,10 +59,10 @@ def execute_task(task_id: str):
         def read_stream(stream, buf, prefix):
             for line in stream:
                 buf.append(line)
-                print(f"  [{task_id[:8]}] {prefix} {line}", end="")
+                log.info(f"  [{task_id[:8]}] {prefix} {line.rstrip()}")
 
-        t_out = threading.Thread(target=read_stream, args=(proc.stdout, stdout_lines, "│"))
-        t_err = threading.Thread(target=read_stream, args=(proc.stderr, stderr_lines, "ERR│"))
+        t_out = threading.Thread(target=read_stream, args=(proc.stdout, stdout_lines, "|"))
+        t_err = threading.Thread(target=read_stream, args=(proc.stderr, stderr_lines, "ERR|"))
         t_out.start()
         t_err.start()
 
@@ -69,8 +85,8 @@ def execute_task(task_id: str):
     stderr = "".join(stderr_lines)
     status = "done" if code == 0 else "failed"
 
-    print(f"[TASK {task_id[:8]}] {status.upper()} (exit {code})")
-    print(f"{'='*50}\n")
+    log.info(f"[TASK {task_id[:8]}] {status.upper()} (exit {code})")
+    log.info(f"{'='*50}")
 
     with lock:
         tasks[task_id].update(
@@ -143,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
     def _restart():
         import time
         time.sleep(1)
-        print("\n[*] Restarting...\n")
+        log.info("Restarting...")
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def do_GET(self):
@@ -166,10 +182,8 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(404, {"error": "Not found"})
 
     def log_message(self, fmt, *args):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.client_address[0]} {args[0]}")
+        log.info(f"{self.client_address[0]} {args[0]}")
 
-
-import socket
 
 def get_local_ip():
     try:
@@ -181,14 +195,16 @@ def get_local_ip():
     except Exception:
         return "unknown"
 
+
 def main():
     if not API_KEY:
-        print("Set TASKRUNNER_API_KEY env var")
+        log.error("Set TASKRUNNER_API_KEY env var")
         sys.exit(1)
     local_ip = get_local_ip()
     server = HTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"AiRelay listening on http://0.0.0.0:{PORT}")
-    print(f"Local IP: {local_ip} — use http://{local_ip}:{PORT} from other machines")
+    log.info(f"AiRelay v{VERSION} listening on http://0.0.0.0:{PORT}")
+    log.info(f"Local IP: {local_ip} — use http://{local_ip}:{PORT} from other machines")
+    log.info(f"Log file: {LOG_FILE}")
     server.serve_forever()
 
 
