@@ -1,0 +1,125 @@
+import os
+import sys
+import uuid
+import threading
+import tempfile
+import subprocess
+from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
+
+API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
+PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
+TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
+
+tasks: dict[str, dict] = {}
+lock = threading.Lock()
+
+
+def execute_task(task_id: str):
+    with lock:
+        task = tasks[task_id]
+        task["status"] = "running"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(task["script"])
+        tmp = f.name
+
+    try:
+        r = subprocess.run([sys.executable, tmp], capture_output=True, text=True, timeout=TIMEOUT)
+        stdout, stderr, code = r.stdout, r.stderr, r.returncode
+    except subprocess.TimeoutExpired:
+        stdout, stderr, code = "", f"Timeout ({TIMEOUT}s)", 1
+    except Exception as e:
+        stdout, stderr, code = "", str(e), 1
+    finally:
+        os.unlink(tmp)
+
+    with lock:
+        tasks[task_id].update(
+            status="done" if code == 0 else "failed",
+            stdout=stdout[-10000:],
+            stderr=stderr[-10000:],
+            exitCode=code,
+            finishedAt=datetime.utcnow().isoformat() + "Z",
+        )
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _auth(self):
+        if self.headers.get("x-api-key") != API_KEY:
+            self._respond(401, {"error": "Unauthorized"})
+            return False
+        return True
+
+    def _respond(self, code, data):
+        body = json.dumps(data, default=str).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length)) if length else {}
+
+    def do_POST(self):
+        if not self._auth():
+            return
+        if self.path == "/tasks":
+            body = self._read_body()
+            script = body.get("script")
+            if not script:
+                return self._respond(400, {"error": "script required"})
+            task_id = str(uuid.uuid4())
+            task = {
+                "id": task_id,
+                "script": script,
+                "status": "pending",
+                "stdout": "",
+                "stderr": "",
+                "exitCode": None,
+                "createdAt": datetime.utcnow().isoformat() + "Z",
+                "finishedAt": None,
+            }
+            with lock:
+                tasks[task_id] = task
+            threading.Thread(target=execute_task, args=(task_id,), daemon=True).start()
+            self._respond(201, task)
+        else:
+            self._respond(404, {"error": "Not found"})
+
+    def do_GET(self):
+        if not self._auth():
+            return
+        if self.path == "/tasks":
+            with lock:
+                result = sorted(tasks.values(), key=lambda t: t["createdAt"], reverse=True)[:50]
+            self._respond(200, result)
+        elif self.path.startswith("/tasks/"):
+            task_id = self.path.split("/tasks/")[1]
+            with lock:
+                task = tasks.get(task_id)
+            if not task:
+                return self._respond(404, {"error": "Not found"})
+            self._respond(200, task)
+        elif self.path == "/health":
+            self._respond(200, {"status": "ok"})
+        else:
+            self._respond(404, {"error": "Not found"})
+
+    def log_message(self, fmt, *args):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
+
+
+def main():
+    if not API_KEY:
+        print("Set TASKRUNNER_API_KEY env var")
+        sys.exit(1)
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"AiRelay listening on http://0.0.0.0:{PORT}")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
