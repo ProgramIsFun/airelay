@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+from store import MemoryStore
 
 # Logging setup
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,16 +29,14 @@ API_KEY = os.environ.get("TASKRUNNER_API_KEY", "")
 PORT = int(os.environ.get("TASKRUNNER_PORT", "3200"))
 TIMEOUT = int(os.environ.get("TASK_TIMEOUT", "600"))
 ALLOWED_IPS = [ip.strip() for ip in os.environ.get("ALLOWED_IPS", "").split(",") if ip.strip()]
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
-tasks: dict[str, dict] = {}
-lock = threading.Lock()
+store = MemoryStore()
 
 
 def execute_task(task_id: str):
-    with lock:
-        task = tasks[task_id]
-        task["status"] = "running"
+    store.update(task_id, {"status": "running"})
+    task = store.get(task_id)
 
     log.info(f"{'='*50}")
     log.info(f"[TASK {task_id[:8]}] Started")
@@ -81,21 +80,17 @@ def execute_task(task_id: str):
     finally:
         os.unlink(tmp)
 
-    stdout = "".join(stdout_lines)
-    stderr = "".join(stderr_lines)
     status = "done" if code == 0 else "failed"
+    store.update(task_id, {
+        "status": status,
+        "stdout": "".join(stdout_lines)[-10000:],
+        "stderr": "".join(stderr_lines)[-10000:],
+        "exitCode": code,
+        "finishedAt": datetime.utcnow().isoformat() + "Z",
+    })
 
     log.info(f"[TASK {task_id[:8]}] {status.upper()} (exit {code})")
     log.info(f"{'='*50}")
-
-    with lock:
-        tasks[task_id].update(
-            status=status,
-            stdout=stdout[-10000:],
-            stderr=stderr[-10000:],
-            exitCode=code,
-            finishedAt=datetime.utcnow().isoformat() + "Z",
-        )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -128,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
             if not script:
                 return self._respond(400, {"error": "script required"})
             task_id = str(uuid.uuid4())
-            task = {
+            task = store.create({
                 "id": task_id,
                 "script": script,
                 "status": "pending",
@@ -137,9 +132,7 @@ class Handler(BaseHTTPRequestHandler):
                 "exitCode": None,
                 "createdAt": datetime.utcnow().isoformat() + "Z",
                 "finishedAt": None,
-            }
-            with lock:
-                tasks[task_id] = task
+            })
             threading.Thread(target=execute_task, args=(task_id,), daemon=True).start()
             self._respond(201, task)
         elif self.path == "/update":
@@ -166,13 +159,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth():
             return
         if self.path == "/tasks":
-            with lock:
-                result = sorted(tasks.values(), key=lambda t: t["createdAt"], reverse=True)[:50]
-            self._respond(200, result)
+            self._respond(200, store.list())
         elif self.path.startswith("/tasks/"):
             task_id = self.path.split("/tasks/")[1]
-            with lock:
-                task = tasks.get(task_id)
+            task = store.get(task_id)
             if not task:
                 return self._respond(404, {"error": "Not found"})
             self._respond(200, task)
