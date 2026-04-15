@@ -116,12 +116,26 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.client_address[0]} {args[0]}")
 
 
+import socket
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "unknown"
+
 def main():
     if not API_KEY:
         print("Set TASKRUNNER_API_KEY env var")
         sys.exit(1)
+    local_ip = get_local_ip()
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"AiRelay listening on http://0.0.0.0:{PORT}")
+    print(f"Local IP: {local_ip} — use http://{local_ip}:{PORT} from other machines")
     server.serve_forever()
 
 
